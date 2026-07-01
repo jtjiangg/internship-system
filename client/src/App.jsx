@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useState } from 'react';
+import Dashboard from './Dashboard.jsx'; // NEW IMPORT
 
 function App() {
-  // Toggle between Login and Register mode
   const [isLogin, setIsLogin] = useState(true);
+  
+  // NEW: State to hold the logged-in user's data
+  const [currentUser, setCurrentUser] = useState(null);
 
-  // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('Student');
 
-  // The Login Handshake (You already built this!)
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -23,7 +24,8 @@ function App() {
       
       if (response.ok) {
         localStorage.setItem('internship_token', data.token);
-        alert(`Welcome back, ${data.user.full_name}!`);
+        // Save the user data to state to trigger the Dashboard
+        setCurrentUser(data.user); 
       } else {
         alert(data.error);
       }
@@ -33,7 +35,6 @@ function App() {
     }
   };
 
-  // NEW: The Register Handshake
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
@@ -46,8 +47,8 @@ function App() {
       
       if (response.ok) {
         alert("Account successfully created! You can now log in.");
-        setIsLogin(true); // Automatically flip back to the login screen
-        setPassword('');  // Clear the password for security
+        setIsLogin(true);
+        setPassword('');
       } else {
         alert(data.error);
       }
@@ -57,18 +58,28 @@ function App() {
     }
   };
 
+  // Logout function to clear the token and state
+  const handleLogout = () => {
+    localStorage.removeItem('internship_token');
+    setCurrentUser(null);
+    setEmail('');
+    setPassword('');
+  };
+
+  //If a user exists in state, show the Dashboard instead of the Login form
+  if (currentUser) {
+    return <Dashboard user={currentUser} onLogout={handleLogout} />;
+  }
+
+  // Otherwise, show the Login/Register screen
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        
         <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
           {isLogin ? 'Internship System Login' : 'Create an Account'}
         </h2>
-
-        {/* The form dynamically calls the right function based on state */}
         <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
           
-          {/* --- THESE FIELDS ONLY SHOW DURING REGISTRATION --- */}
           {!isLogin && (
             <>
               <div>
@@ -82,7 +93,6 @@ function App() {
                   required
                 />
               </div>
-              
               <div>
                 <label className="block text-gray-700 font-semibold mb-1">Role:</label>
                 <select 
@@ -98,7 +108,6 @@ function App() {
             </>
           )}
 
-          {/* --- THESE FIELDS SHOW ALL THE TIME --- */}
           <div>
             <label className="block text-gray-700 font-semibold mb-1">Email:</label>
             <input 
@@ -123,25 +132,14 @@ function App() {
             />
           </div>
 
-          {/* --- ACTION BUTTONS --- */}
           <div className="flex flex-col pt-4 space-y-3">
-            <button 
-              type="submit" 
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
               {isLogin ? 'Login' : 'Sign Up'}
             </button>
-            
-            {/* The Toggle Switch */}
-            <button 
-              type="button" 
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-gray-500 hover:text-gray-700 text-sm font-semibold"
-            >
+            <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-gray-500 hover:text-gray-700 text-sm font-semibold">
               {isLogin ? "Don't have an account? Register" : "Already have an account? Login"}
             </button>
           </div>
-
         </form>
       </div>
     </div>

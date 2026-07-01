@@ -9,11 +9,16 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      // Any request starting with /api will be sent to the Node server
+      // Rule 1: API requests
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '') // Strips /api before sending
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      // Rule 2: NEW! File Upload requests
+      '/uploads': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
       }
     }
   }

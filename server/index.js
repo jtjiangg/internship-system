@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -16,6 +19,28 @@ const pool = mysql.createPool({
         rejectUnauthorized:false
     }
 });
+
+// Create an 'uploads' directory if it doesn't exist yet
+const uploadDir = './uploads';
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir);
+}
+
+// Configure how files are named and saved
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    // Keeps original extension (e.g. .jpg, .pdf) and adds a unique timestamp
+    cb(null, Date.now() + path.extname(file.originalname)); 
+  }
+});
+
+const upload = multer({ storage: storage });
+
+// Serve the uploads folder publicly so the browser can access files
+app.use('/uploads', express.static('uploads'));
 
 app.use(cors());
 app.use(express.json());
@@ -65,6 +90,27 @@ app.post('/register', async(req, res) => {
     }
 });
 
+// --- THE BOUNCER (JWT Middleware) ---
+const authenticateToken = (req, res, next) => {
+  // 1. Look for the token in the request headers
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Splits "Bearer <token>"
+
+  // 2. If there is no token, kick them out
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. Please log in first.' });
+  }
+
+  // 3. If there is a token, verify it hasn't been forged or expired
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid or expired token.' });
+    
+    // 4. Token is valid. Attach the user's ID and Role to the request and let them through
+    req.user = user; 
+    next(); 
+  });
+};
+
 // Login
 app.post('/login', async (req, res) => {
   try {
@@ -110,6 +156,54 @@ app.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Failed to log in.' });
+  }
+});
+
+// --- GET: Fetch Logbook History ---
+app.get('/logbooks', authenticateToken, async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    // Fetch logs for this specific student, newest first
+    const [rows] = await pool.query(
+      'SELECT * FROM Logbooks WHERE student_id = ? ORDER BY date DESC', 
+      [studentId]
+    );
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch logbooks error:', error);
+    res.status(500).json({ error: 'Failed to fetch logbook entries.' });
+  }
+});
+
+  // Submit Logbook Route (Protected)
+// UPDATED: Submit Logbook Route with File Upload
+app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, res) => {
+  try {
+    if (req.user.role !== 'Student') {
+      return res.status(403).json({ error: 'Only students can submit logbooks.' });
+    }
+
+    const { date, clock_in, clock_out, task_description } = req.body;
+    const studentId = req.user.userId;
+
+    // If a file was uploaded, construct its public URL path
+    const evidence_url = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const insertLogQuery = `
+      INSERT INTO Logbooks (student_id, date, clock_in, clock_out, task_description, evidence_url, hours_worked) 
+      VALUES (?, ?, ?, ?, ?, ?, TIMESTAMPDIFF(MINUTE, CONCAT(?, ' ', ?), CONCAT(?, ' ', ?)) / 60.0)
+    `;
+    
+    await pool.query(insertLogQuery, [
+      studentId, date, clock_in, clock_out, task_description, evidence_url,
+      date, clock_in, date, clock_out
+    ]);
+
+    res.status(201).json({ message: 'Logbook entry saved successfully!' });
+
+  } catch (error) {
+    console.error('Logbook submission error:', error);
+    res.status(500).json({ error: 'Failed to save logbook entry.' });
   }
 });
 
