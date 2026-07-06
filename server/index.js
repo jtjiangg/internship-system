@@ -159,6 +159,17 @@ app.post('/login', async (req, res) => {
   }
 });
 
+// --- GET: Fetch Company Directory ---
+app.get('/companies', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Companies ORDER BY name ASC');
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch companies error:', error);
+    res.status(500).json({ error: 'Failed to fetch companies.' });
+  }
+});
+
 // --- GET: Fetch Logbook History ---
 app.get('/logbooks', authenticateToken, async (req, res) => {
   try {

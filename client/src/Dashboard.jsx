@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import CompanyDirectory from '/workspaces/internship-system/client/CompanyDirectory.jsx';
 
 function Dashboard({ user, onLogout }) {
-  const [showLogbookForm, setShowLogbookForm] = useState(false);
+  // View Router State: 'home', 'logbook', or 'companies'
+  const [currentView, setCurrentView] = useState('home');
+  
   const [logbooks, setLogbooks] = useState([]);
   
-  // Fully updated form states
+  // Logbook Form State
   const [date, setDate] = useState('');
   const [clockIn, setClockIn] = useState('');
   const [clockOut, setClockOut] = useState('');
   const [report, setReport] = useState('');
-  const [evidenceFile, setEvidenceFile] = useState(null); // Holds the actual file object
+  const [evidenceFile, setEvidenceFile] = useState(null);
 
   const fetchLogbooks = async () => {
     const token = localStorage.getItem('internship_token');
@@ -34,22 +37,19 @@ function Dashboard({ user, onLogout }) {
     e.preventDefault();
     const token = localStorage.getItem('internship_token');
 
-    // CRITICAL: Use FormData when uploading files instead of plain JSON stringify
     const formData = new FormData();
     formData.append('date', date);
     formData.append('clock_in', clockIn);
     formData.append('clock_out', clockOut);
     formData.append('task_description', report);
     if (evidenceFile) {
-      formData.append('evidence', evidenceFile); // Attaches the file
+      formData.append('evidence', evidenceFile);
     }
 
     try {
       const response = await fetch('/api/logbooks', {
         method: 'POST',
         headers: {
-          // Note: DO NOT set 'Content-Type' header here. 
-          // The browser will automatically set it to 'multipart/form-data' with the correct boundary.
           'Authorization': `Bearer ${token}` 
         },
         body: formData,
@@ -60,8 +60,8 @@ function Dashboard({ user, onLogout }) {
       if (response.ok) {
         alert("Success! Your logbook entry has been safely saved.");
         setDate(''); setClockIn(''); setClockOut(''); setReport(''); setEvidenceFile(null);
-        setShowLogbookForm(false);
-        fetchLogbooks(); 
+        setCurrentView('home'); // Go back to home after submitting
+        fetchLogbooks(); // Refresh the table
       } else {
         alert(data.error);
       }
@@ -75,7 +75,7 @@ function Dashboard({ user, onLogout }) {
     <div className="min-h-screen bg-gray-100 p-8">
       <div className="max-w-6xl mx-auto">
         
-        {/* Header */}
+        {/* --- GLOBAL HEADER --- */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-800">Welcome back, {user?.full_name}!</h1>
@@ -86,14 +86,20 @@ function Dashboard({ user, onLogout }) {
           </button>
         </div>
 
-        {showLogbookForm ? (
-          
-          /* --- THE PERFECTED FORM --- */
+        {/* --- VIEW ROUTER --- */}
+
+        {/* 1. COMPANY DIRECTORY VIEW */}
+        {currentView === 'companies' && (
+          <CompanyDirectory onBack={() => setCurrentView('home')} />
+        )}
+
+        {/* 2. LOGBOOK FORM VIEW */}
+        {currentView === 'logbook' && (
           <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500 max-w-2xl mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-800">New Logbook Entry</h2>
-              <button onClick={() => setShowLogbookForm(false)} className="text-gray-500 hover:text-gray-800 font-semibold">
-                &larr; Back
+              <button onClick={() => setCurrentView('home')} className="text-gray-500 hover:text-gray-800 font-semibold">
+                &larr; Back to Dashboard
               </button>
             </div>
 
@@ -103,7 +109,6 @@ function Dashboard({ user, onLogout }) {
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded" required />
               </div>
 
-              {/* Time Fields */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-gray-700 font-semibold mb-1">Clock In:</label>
@@ -120,7 +125,6 @@ function Dashboard({ user, onLogout }) {
                 <textarea value={report} onChange={(e) => setReport(e.target.value)} rows="4" placeholder="Describe the tasks you completed today..." className="w-full px-4 py-2 border border-gray-300 rounded" required></textarea>
               </div>
 
-              {/* True File Upload Box */}
               <div>
                 <label className="block text-gray-700 font-semibold mb-1">Upload Evidence (Photos / PDF Documents):</label>
                 <input 
@@ -136,23 +140,30 @@ function Dashboard({ user, onLogout }) {
               </button>
             </form>
           </div>
+        )}
 
-        ) : (
-
-          /* --- THE DASHBOARD & HISTORY TABLE --- */
+        {/* 3. HOME VIEW (Action Grid + History Table) */}
+        {currentView === 'home' && (
           <div className="space-y-6">
             
-            <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-blue-500 flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">Daily Logbook</h2>
-                <p className="text-gray-600">Submit and track your daily activities and progress.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500">
+                <h2 className="text-xl font-bold text-gray-800 mb-2">Daily Logbook</h2>
+                <p className="text-gray-600 mb-4">Submit and track your daily activities and progress.</p>
+                <button onClick={() => setCurrentView('logbook')} className="text-blue-600 font-semibold hover:underline">
+                  + New Entry
+                </button>
               </div>
-              <button onClick={() => setShowLogbookForm(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded">
-                + New Entry
-              </button>
+
+              <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-green-500">
+                <h2 className="text-xl font-bold text-gray-800 mb-2">Company List</h2>
+                <p className="text-gray-600 mb-4">Browse approved companies for your internship placement.</p>
+                <button onClick={() => setCurrentView('companies')} className="text-green-600 font-semibold hover:underline">
+                  View Companies &rarr;
+                </button>
+              </div>
             </div>
 
-            {/* The History Table */}
             <div className="bg-white rounded-lg shadow-md overflow-hidden">
               <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-bold text-gray-800">Your Logbook History</h3>
