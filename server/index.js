@@ -331,6 +331,26 @@ app.delete('/admin/resources/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Super Admin: Fetch Company Supervisors for dropdowns & directory
+app.get('/admin/supervisors', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') return res.status(403).json({ error: 'Unauthorized' });
+    
+    // Updated query to pull ALL company profile data for the directory table
+    const [rows] = await pool.query(`
+      SELECT U.id, U.full_name as supervisor_name, 
+             C.company_name, C.company_id_number, C.address, C.company_phone, C.photo_url 
+      FROM Users U
+      LEFT JOIN Company_Profiles C ON U.id = C.user_id
+      WHERE U.role = 'Company_Supervisor'
+    `);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch supervisors error:', error);
+    res.status(500).json({ error: 'Failed to fetch supervisors.' });
+  }
+});
+
 //Admin: Create a New User
 app.post('/admin/create-user', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
@@ -340,23 +360,28 @@ app.post('/admin/create-user', authenticateToken, upload.single('photo'), async 
 
     const { 
       full_name, email, role, student_staff_id, contact_number, program,
-      company_name, company_id_number, address, company_phone, supervisor_name
+      company_name, company_id_number, address, company_phone, supervisor_name,
+      assigned_company, assigned_supervisor_id, internship_duration // <-- NEW FIELDS
     } = req.body;
 
-    // Check if user exists
     const [existing] = await pool.query('SELECT id FROM Users WHERE email = ?', [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'Email already exists.' });
-    }
+    if (existing.length > 0) return res.status(400).json({ error: 'Email already exists.' });
 
-    // Default password for admin-created accounts
     const hashedPassword = await bcrypt.hash('succms2026', 10);
 
-    // 1. Create the base user
+    // 1. Create the base user (now including assignment fields)
     const [userResult] = await pool.query(`
-      INSERT INTO Users (full_name, email, password, role, student_staff_id, contact_number, program) 
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [full_name, email, hashedPassword, role, student_staff_id, contact_number, program]);
+      INSERT INTO Users (
+        full_name, email, password, role, student_staff_id, 
+        contact_number, program, assigned_company, assigned_supervisor_id, internship_duration
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      full_name, email, hashedPassword, role, student_staff_id, 
+      contact_number, program, 
+      assigned_company || null, 
+      assigned_supervisor_id || null, 
+      internship_duration || null
+    ]);
 
     const newUserId = userResult.insertId;
 
