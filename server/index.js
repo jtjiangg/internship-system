@@ -7,6 +7,8 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 dotenv.config();
 
@@ -20,27 +22,22 @@ const pool = mysql.createPool({
     }
 });
 
-// Create an 'uploads' directory if it doesn't exist yet
-const uploadDir = './uploads';
-if (!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir);
-}
+// --- CLOUDINARY FILE UPLOAD SETUP ---
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// Configure how files are named and saved
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'internship_logbooks', // Creates a dedicated folder in your Cloudinary account
+    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'] 
   },
-  filename: (req, file, cb) => {
-    // Keeps original extension (e.g. .jpg, .pdf) and adds a unique timestamp
-    cb(null, Date.now() + path.extname(file.originalname)); 
-  }
 });
 
 const upload = multer({ storage: storage });
-
-// Serve the uploads folder publicly so the browser can access files
-app.use('/uploads', express.static('uploads'));
 
 app.use(cors());
 app.use(express.json());
@@ -186,8 +183,7 @@ app.get('/logbooks', authenticateToken, async (req, res) => {
   }
 });
 
-  // Submit Logbook Route (Protected)
-// UPDATED: Submit Logbook Route with File Upload
+// Submit Logbook Route with File Upload
 app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, res) => {
   try {
     if (req.user.role !== 'Student') {
@@ -198,7 +194,7 @@ app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, 
     const studentId = req.user.userId;
 
     // If a file was uploaded, construct its public URL path
-    const evidence_url = req.file ? `/uploads/${req.file.filename}` : null;
+    const evidence_url = req.file ? req.file.path : null;
 
     const insertLogQuery = `
       INSERT INTO Logbooks (student_id, date, clock_in, clock_out, task_description, evidence_url, hours_worked) 
@@ -215,6 +211,261 @@ app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, 
   } catch (error) {
     console.error('Logbook submission error:', error);
     res.status(500).json({ error: 'Failed to save logbook entry.' });
+  }
+});
+
+// --- EVALUATOR DASHBOARD ROUTES ---
+
+// 1. Fetch all student logbooks (Evaluators Only)
+app.get('/evaluator/logbooks', authenticateToken, async (req, res) => {
+  try {
+    // Security check: Kick out students
+    if (req.user.role === 'Student') {
+      return res.status(403).json({ error: 'Unauthorized access.' });
+    }
+    
+    // Join Users table to get the actual student name instead of just their ID
+    const query = `
+      SELECT L.*, U.full_name AS student_name 
+      FROM Logbooks L 
+      JOIN Users U ON L.student_id = U.id 
+      ORDER BY L.date DESC
+    `;
+    const [rows] = await pool.query(query);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch evaluator logbooks error:', error);
+    res.status(500).json({ error: 'Failed to fetch logbooks.' });
+  }
+});
+
+// 2. Update Logbook Status & Comments (Approve/Reject)
+app.put('/logbooks/:id/status', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'Student') {
+      return res.status(403).json({ error: 'Unauthorized access.' });
+    }
+    
+    const { status, comments } = req.body; 
+    const logbookId = req.params.id;
+    
+    await pool.query('UPDATE Logbooks SET status = ?, comments = ? WHERE id = ?', [status, comments || null, logbookId]);
+    res.status(200).json({ message: `Logbook ${status} successfully.` });
+  } catch (error) {
+    console.error('Update status error:', error);
+    res.status(500).json({ error: 'Failed to update logbook status.' });
+  }
+});
+
+// --- SUPER-ADMIN ROUTES ---
+
+// 1. Fetch all users
+app.get('/admin/users', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Super Admin access required.' });
+    }
+    
+    const [rows] = await pool.query(
+      'SELECT id, full_name, email, role, created_at FROM Users ORDER BY role, full_name'
+    );
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch users error:', error);
+    res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
+// 2. Delete a user
+app.delete('/admin/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Super Admin access required.' });
+    }
+    
+    // Prevent the admin from deleting themselves
+    if (parseInt(req.params.id) === req.user.userId) {
+      return res.status(400).json({ error: 'You cannot delete your own admin account.' });
+    }
+
+    await pool.query('DELETE FROM Users WHERE id = ?', [req.params.id]);
+    res.status(200).json({ message: 'User deleted successfully.' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user.' });
+  }
+});
+
+// --- GLOBAL RESOURCES ROUTES ---
+
+// Admin: Upload a new resource
+app.post('/admin/resources', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+    const { title, category } = req.body;
+    const file_url = req.file ? `/uploads/${req.file.filename}` : null;
+    
+    if (!file_url) return res.status(400).json({ error: 'File is required.' });
+
+    await pool.query('INSERT INTO Resources (title, category, file_url) VALUES (?, ?, ?)', [title, category, file_url]);
+    res.status(201).json({ message: 'Resource uploaded successfully.' });
+  } catch (error) {
+    console.error('Resource upload error:', error);
+    res.status(500).json({ error: 'Upload failed.' });
+  }
+});
+
+// Admin: Delete a resource
+app.delete('/admin/resources/:id', authenticateToken, async (req, res) => {
+  try {
+     if (req.user.role !== 'Super_Admin') {
+       return res.status(403).json({ error: 'Unauthorized.' });
+     }
+     await pool.query('DELETE FROM Resources WHERE id = ?', [req.params.id]);
+     res.status(200).json({ message: 'Deleted successfully.' });
+  } catch(error) {
+     console.error('Resource delete error:', error);
+     res.status(500).json({error: 'Failed to delete.'});
+  }
+});
+
+//Admin: Create a New User
+app.post('/admin/create-user', authenticateToken, upload.single('photo'), async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Super Admin access required.' });
+    }
+
+    const { 
+      full_name, email, role, student_staff_id, contact_number, program,
+      company_name, company_id_number, address, company_phone, supervisor_name
+    } = req.body;
+
+    // Check if user exists
+    const [existing] = await pool.query('SELECT id FROM Users WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'Email already exists.' });
+    }
+
+    // Default password for admin-created accounts
+    const hashedPassword = await bcrypt.hash('succms2026', 10);
+
+    // 1. Create the base user
+    const [userResult] = await pool.query(`
+      INSERT INTO Users (full_name, email, password, role, student_staff_id, contact_number, program) 
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [full_name, email, hashedPassword, role, student_staff_id, contact_number, program]);
+
+    const newUserId = userResult.insertId;
+
+    // 2. If it's a Company Supervisor, inject the business data
+    if (role === 'Company_Supervisor') {
+      const photo_url = req.file ? req.file.path : null;
+      
+      await pool.query(`
+        INSERT INTO Company_Profiles (user_id, company_name, company_id_number, address, company_phone, supervisor_name, photo_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [newUserId, company_name, company_id_number, address, company_phone, supervisor_name, photo_url]);
+    }
+
+    res.status(201).json({ message: 'User created successfully.' });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Failed to create user.' });
+  }
+});
+
+// Delete a specific logbook record
+app.delete('/admin/logbooks/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Super Admin access required.' });
+    }
+    
+    await pool.query('DELETE FROM Logbooks WHERE id = ?', [req.params.id]);
+    res.status(200).json({ message: 'Logbook record permanently deleted.' });
+  } catch (error) {
+    console.error('Delete logbook error:', error);
+    res.status(500).json({ error: 'Failed to delete logbook record.' });
+  }
+});
+
+// Everyone: View all resources
+app.get('/resources', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Resources ORDER BY created_at DESC');
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch resources error:', error);
+    res.status(500).json({ error: 'Failed to fetch resources.' });
+  }
+});
+
+// --- FINAL EVALUATION ROUTES ---
+
+// Get all students for evaluation grading
+app.get('/evaluator/students', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'Student') return res.status(403).json({ error: 'Unauthorized.' });
+    
+    // Fetch all students and their current evaluation status
+    const query = `
+      SELECT U.id, U.full_name, U.email, 
+             COALESCE(E.company_score, 0) as company_score, 
+             COALESCE(E.company_evaluated, 0) as company_evaluated
+      FROM Users U
+      LEFT JOIN Evaluations E ON U.id = E.student_id
+      WHERE U.role = 'Student'
+    `;
+    const [rows] = await pool.query(query);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch students error:', error);
+    res.status(500).json({ error: 'Failed to fetch students.' });
+  }
+});
+
+// Company Supervisor: Submit Final Evaluation
+app.post('/evaluator/company-score', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'Student') return res.status(403).json({ error: 'Unauthorized.' });
+
+    const { student_id, score } = req.body;
+
+    const upsertQuery = `
+      INSERT INTO Evaluations (student_id, company_score, company_evaluated) 
+      VALUES (?, ?, TRUE)
+      ON DUPLICATE KEY UPDATE company_score = ?, company_evaluated = TRUE
+    `;
+    
+    await pool.query(upsertQuery, [student_id, score, score]);
+    res.status(200).json({ message: 'Evaluation submitted successfully.' });
+  } catch (error) {
+    console.error('Submit evaluation error:', error);
+    res.status(500).json({ error: 'Failed to submit evaluation.' });
+  }
+});
+
+// Lecturer Supervisor: Submit Final Evaluation
+app.post('/evaluator/lecturer-score', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'Student') return res.status(403).json({ error: 'Unauthorized.' });
+
+    const { student_id, score } = req.body;
+
+    const upsertQuery = `
+      INSERT INTO Evaluations (student_id, lecturer_score, lecturer_evaluated) 
+      VALUES (?, ?, TRUE)
+      ON DUPLICATE KEY UPDATE lecturer_score = ?, lecturer_evaluated = TRUE
+    `;
+    
+    await pool.query(upsertQuery, [student_id, score, score]);
+    res.status(200).json({ message: 'Lecturer evaluation submitted successfully.' });
+  } catch (error) {
+    console.error('Submit evaluation error:', error);
+    res.status(500).json({ error: 'Failed to submit evaluation.' });
   }
 });
 

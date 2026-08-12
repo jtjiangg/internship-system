@@ -6,7 +6,7 @@ function CompanyDirectory({ onBack }) {
 
   useEffect(() => {
     const fetchCompanies = async () => {
-      const token = localStorage.getItem('internship_token');
+      const token = sessionStorage.getItem('internship_token');
       try {
         const response = await fetch('/api/companies', {
           headers: { 'Authorization': `Bearer ${token}` }

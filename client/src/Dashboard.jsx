@@ -6,6 +6,11 @@ function Dashboard({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('home');
   
   const [logbooks, setLogbooks] = useState([]);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // --- NEW: Resources State ---
+  const [resources, setResources] = useState([]);
   
   // Logbook Form State
   const [date, setDate] = useState('');
@@ -15,7 +20,7 @@ function Dashboard({ user, onLogout }) {
   const [evidenceFile, setEvidenceFile] = useState(null);
 
   const fetchLogbooks = async () => {
-    const token = localStorage.getItem('internship_token');
+    const token = sessionStorage.getItem('internship_token');
     try {
       const response = await fetch('/api/logbooks', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -29,22 +34,40 @@ function Dashboard({ user, onLogout }) {
     }
   };
 
+  // --- NEW: Fetch Resources Function ---
+  const fetchResources = async () => {
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch('/api/resources', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setResources(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch resources:", error);
+    }
+  };
+
+  // --- UPDATED: Fetch both when dashboard loads ---
   useEffect(() => {
     fetchLogbooks();
+    fetchResources();
   }, []);
 
   const handleLogbookSubmit = async (e) => {
     e.preventDefault();
-    const token = localStorage.getItem('internship_token');
+    
+    // 👇 Add this check to stop double-clicks
+    if (isSubmitting) return; 
+    
+    // 👇 Lock the form
+    setIsSubmitting(true); 
 
+    const token = sessionStorage.getItem('internship_token');
     const formData = new FormData();
-    formData.append('date', date);
-    formData.append('clock_in', clockIn);
-    formData.append('clock_out', clockOut);
-    formData.append('task_description', report);
-    if (evidenceFile) {
-      formData.append('evidence', evidenceFile);
-    }
+    // ... all your existing formData.append lines ...
 
     try {
       const response = await fetch('/api/logbooks', {
@@ -60,14 +83,17 @@ function Dashboard({ user, onLogout }) {
       if (response.ok) {
         alert("Success! Your logbook entry has been safely saved.");
         setDate(''); setClockIn(''); setClockOut(''); setReport(''); setEvidenceFile(null);
-        setCurrentView('home'); // Go back to home after submitting
-        fetchLogbooks(); // Refresh the table
+        setCurrentView('home'); 
+        fetchLogbooks(); 
       } else {
         alert(data.error);
       }
     } catch (error) {
       console.error("Network error:", error);
       alert("Could not connect to the server.");
+    } finally {
+      // 👇 Unlock the form when done (whether it succeeded or failed)
+      setIsSubmitting(false);
     }
   };
 
@@ -135,8 +161,14 @@ function Dashboard({ user, onLogout }) {
                 />
               </div>
 
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded mt-4">
-                Submit Entry
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className={`w-full font-bold py-3 px-6 rounded transition-colors mt-4 ${
+                isSubmitting ? 'bg-gray-400 cursor-not-allowed text-gray-200' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                 }`}
+               >
+                {isSubmitting ? 'Submitting...' : 'Submit Entry'}
               </button>
             </form>
           </div>
@@ -161,6 +193,32 @@ function Dashboard({ user, onLogout }) {
                 <button onClick={() => setCurrentView('companies')} className="text-green-600 font-semibold hover:underline">
                   View Companies &rarr;
                 </button>
+              </div>
+            </div>
+
+            {/* --- NEW: Official Forms & Information Card --- */}
+            <div className="bg-white rounded-lg shadow-md overflow-hidden border-t-4 border-purple-500">
+              <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-bold text-gray-800">Official Forms & Information</h3>
+              </div>
+              <div className="p-6">
+                <ul className="space-y-3">
+                  {resources.length === 0 ? (
+                    <li className="text-gray-500">No documents available at this time.</li>
+                  ) : (
+                    resources.map((doc, index) => (
+                      <li key={doc.id} className="flex items-center text-blue-600 hover:text-blue-800 transition-colors">
+                        <span className="font-bold text-gray-400 mr-3">{index + 1}.</span>
+                        <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+                          {doc.title}
+                        </a>
+                        <span className="ml-2 text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-full">
+                          {doc.category}
+                        </span>
+                      </li>
+                    ))
+                  )}
+                </ul>
               </div>
             </div>
 
@@ -202,12 +260,8 @@ function Dashboard({ user, onLogout }) {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             {log.evidence_url ? (
                               <a 
-                                href={log.evidence_url} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="text-blue-600 hover:underline font-semibold"
-                              >
-                                View File
+                                href={log.evidence_url} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline font-semibold">
+                                View Evidence
                               </a>
                             ) : (
                               <span className="text-gray-400">None</span>
