@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import CompanyDirectory from '/workspaces/internship-system/client/CompanyDirectory.jsx';
+import CompanyDirectory from '/workspaces/internship-system/client/src/CompanyDirectory.jsx';
+import { Card, CardHeader, CardContent, Label, Input, Textarea, Button } from './components/ui';
 
 function Dashboard({ user, onLogout }) {
   // View Router State: 'home', 'logbook', or 'companies'
   const [currentView, setCurrentView] = useState('home');
   
   const [logbooks, setLogbooks] = useState([]);
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // --- NEW: Resources State ---
+  // Resources State
   const [resources, setResources] = useState([]);
   
   // Logbook Form State
@@ -34,7 +34,6 @@ function Dashboard({ user, onLogout }) {
     }
   };
 
-  // --- NEW: Fetch Resources Function ---
   const fetchResources = async () => {
     const token = sessionStorage.getItem('internship_token');
     try {
@@ -50,7 +49,6 @@ function Dashboard({ user, onLogout }) {
     }
   };
 
-  // --- UPDATED: Fetch both when dashboard loads ---
   useEffect(() => {
     fetchLogbooks();
     fetchResources();
@@ -58,16 +56,19 @@ function Dashboard({ user, onLogout }) {
 
   const handleLogbookSubmit = async (e) => {
     e.preventDefault();
-    
-    // 👇 Add this check to stop double-clicks
     if (isSubmitting) return; 
-    
-    // 👇 Lock the form
     setIsSubmitting(true); 
 
     const token = sessionStorage.getItem('internship_token');
     const formData = new FormData();
-    // ... all your existing formData.append lines ...
+    
+    formData.append('date', date);
+    formData.append('clock_in', clockIn);
+    formData.append('clock_out', clockOut);
+    formData.append('task_description', report);
+    if (evidenceFile) {
+      formData.append('evidence', evidenceFile);
+    }
 
     try {
       const response = await fetch('/api/logbooks', {
@@ -92,24 +93,28 @@ function Dashboard({ user, onLogout }) {
       console.error("Network error:", error);
       alert("Could not connect to the server.");
     } finally {
-      // 👇 Unlock the form when done (whether it succeeded or failed)
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
+    <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-6xl mx-auto">
         
         {/* --- GLOBAL HEADER --- */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6 flex justify-between items-center">
+        <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">Welcome back, {user?.full_name}!</h1>
-            <p className="text-gray-600 mt-1">Role: {user?.role}</p>
+            <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user?.full_name}!</h1>
+            <p className="text-gray-500 mt-1">
+              Role: {user?.role.replace('_', ' ')} 
+              <span className="mx-2">|</span> 
+              {/* Dynamically show placement status */}
+              Placement: <span className="font-semibold text-gray-900">{user?.assigned_company || 'Pending Assignment'}</span>
+            </p>
           </div>
-          <button onClick={onLogout} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded">
+          <Button variant="danger" onClick={onLogout}>
             Logout
-          </button>
+          </Button>
         </div>
 
         {/* --- VIEW ROUTER --- */}
@@ -120,160 +125,182 @@ function Dashboard({ user, onLogout }) {
         )}
 
         {/* 2. LOGBOOK FORM VIEW */}
-        {currentView === 'logbook' && (
-          <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500 max-w-2xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-800">New Logbook Entry</h2>
-              <button onClick={() => setCurrentView('home')} className="text-gray-500 hover:text-gray-800 font-semibold">
-                &larr; Back to Dashboard
-              </button>
-            </div>
-
-            <form onSubmit={handleLogbookSubmit} className="space-y-4">
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Date:</label>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded" required />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-700 font-semibold mb-1">Clock In:</label>
-                  <input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded" required />
+        {currentView === 'logbook' && user?.assigned_company && (
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader 
+              title="New Logbook Entry" 
+              subtitle="Document your daily tasks and hours"
+              action={
+                <Button variant="ghost" onClick={() => setCurrentView('home')}>
+                  &larr; Back
+                </Button>
+              }
+            />
+            <CardContent>
+              <form onSubmit={handleLogbookSubmit} className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label>Date</Label>
+                  <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
                 </div>
-                <div>
-                  <label className="block text-gray-700 font-semibold mb-1">Clock Out:</label>
-                  <input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded" required />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Clock In</Label>
+                    <Input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} required />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Clock Out</Label>
+                    <Input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} required />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Report / Description:</label>
-                <textarea value={report} onChange={(e) => setReport(e.target.value)} rows="4" placeholder="Describe the tasks you completed today..." className="w-full px-4 py-2 border border-gray-300 rounded" required></textarea>
-              </div>
+                <div className="space-y-1.5">
+                  <Label>Report / Description</Label>
+                  <Textarea 
+                    value={report} 
+                    onChange={(e) => setReport(e.target.value)} 
+                    placeholder="Describe the tasks you completed today..." 
+                    required
+                  />
+                </div>
 
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Upload Evidence (Photos / PDF Documents):</label>
-                <input 
-                  type="file" 
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setEvidenceFile(e.target.files[0])} 
-                  className="w-full px-4 py-2 border border-gray-300 rounded bg-gray-50 file:mr-4 file:py-1 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" 
-                />
-              </div>
+                <div className="space-y-1.5">
+                  <Label>Upload Evidence (Photos / PDF Documents)</Label>
+                  <Input 
+                    type="file" 
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setEvidenceFile(e.target.files[0])} 
+                    className="pt-1.5 cursor-pointer file:mr-4 file:py-1.5 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-900 hover:file:bg-gray-200" 
+                  />
+                </div>
 
-              <button 
-                type="submit" 
-                disabled={isSubmitting}
-                className={`w-full font-bold py-3 px-6 rounded transition-colors mt-4 ${
-                isSubmitting ? 'bg-gray-400 cursor-not-allowed text-gray-200' : 'bg-blue-600 hover:bg-blue-700 text-white'
-                 }`}
-               >
-                {isSubmitting ? 'Submitting...' : 'Submit Entry'}
-              </button>
-            </form>
-          </div>
+                <div className="pt-4 border-t border-gray-100">
+                  <Button type="submit" className="w-full" disabled={isSubmitting}>
+                    {isSubmitting ? 'Submitting...' : 'Submit Entry'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
         )}
 
-        {/* 3. HOME VIEW (Action Grid + History Table) */}
+        {/* 3. HOME VIEW */}
         {currentView === 'home' && (
           <div className="space-y-6">
             
+            {/* Action Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500">
-                <h2 className="text-xl font-bold text-gray-800 mb-2">Daily Logbook</h2>
-                <p className="text-gray-600 mb-4">Submit and track your daily activities and progress.</p>
-                <button onClick={() => setCurrentView('logbook')} className="text-blue-600 font-semibold hover:underline">
-                  + New Entry
-                </button>
-              </div>
+              <Card>
+                <CardContent className="pt-6 flex flex-col h-full">
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Daily Logbook</h2>
+                  <p className="text-gray-500 mb-6 text-sm flex-grow">Submit and track your daily activities, hours, and visual evidence of your progress.</p>
+                  
+                  {/* LOGIC GATE: Only allow entry if assigned to a company */}
+                  {user?.assigned_company ? (
+                    <Button onClick={() => setCurrentView('logbook')} className="w-full">
+                      + New Logbook Entry
+                    </Button>
+                  ) : (
+                    <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-3 rounded-lg text-sm text-center font-medium">
+                      🔒 Logbook locked. Waiting for Admin placement.
+                    </div>
+                  )}
+                  
+                </CardContent>
+              </Card>
 
-              <div className="bg-white p-6 rounded-lg shadow-md border-t-4 border-green-500">
-                <h2 className="text-xl font-bold text-gray-800 mb-2">Company List</h2>
-                <p className="text-gray-600 mb-4">Browse approved companies for your internship placement.</p>
-                <button onClick={() => setCurrentView('companies')} className="text-green-600 font-semibold hover:underline">
-                  View Companies &rarr;
-                </button>
-              </div>
+              <Card>
+                <CardContent className="pt-6 flex flex-col h-full">
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Company Directory</h2>
+                  <p className="text-gray-500 mb-6 text-sm flex-grow">Browse approved companies and registered supervisors for your internship placement.</p>
+                  <Button variant="secondary" onClick={() => setCurrentView('companies')} className="w-full">
+                    View Companies &rarr;
+                  </Button>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* --- NEW: Official Forms & Information Card --- */}
-            <div className="bg-white rounded-lg shadow-md overflow-hidden border-t-4 border-purple-500">
-              <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-bold text-gray-800">Official Forms & Information</h3>
-              </div>
-              <div className="p-6">
+            {/* Official Forms */}
+            <Card>
+              <CardHeader title="Official Forms & Information" />
+              <CardContent>
                 <ul className="space-y-3">
                   {resources.length === 0 ? (
-                    <li className="text-gray-500">No documents available at this time.</li>
+                    <li className="text-gray-500 text-sm">No documents available at this time.</li>
                   ) : (
                     resources.map((doc, index) => (
-                      <li key={doc.id} className="flex items-center text-blue-600 hover:text-blue-800 transition-colors">
-                        <span className="font-bold text-gray-400 mr-3">{index + 1}.</span>
-                        <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+                      <li key={doc.id} className="flex items-center text-gray-900">
+                        <span className="font-bold text-gray-400 mr-3 text-sm">{index + 1}.</span>
+                        <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline text-sm">
                           {doc.title}
                         </a>
-                        <span className="ml-2 text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-full">
+                        <span className="ml-3 text-xs font-semibold px-2.5 py-0.5 bg-gray-100 text-gray-600 rounded-full border border-gray-200">
                           {doc.category}
                         </span>
                       </li>
                     ))
                   )}
                 </ul>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="bg-white rounded-lg shadow-md overflow-hidden">
-              <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-bold text-gray-800">Your Logbook History</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
-                      <th className="px-6 py-3 font-semibold">Date</th>
-                      <th className="px-6 py-3 font-semibold">Time / Duration</th>
-                      <th className="px-6 py-3 font-semibold">Report</th>
-                      <th className="px-6 py-3 font-semibold">Evidence</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {logbooks.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="px-6 py-8 text-center text-gray-500">
-                          No logbook entries found. Click "+ New Entry" to create your first report!
-                        </td>
+            {/* Logbook History */}
+            <Card>
+              <CardHeader title="Your Logbook History" subtitle="A complete record of your submitted reports" />
+              <CardContent className="p-0 sm:p-6">
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-left border-collapse bg-white">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
+                        <th className="px-6 py-4 font-semibold">Date</th>
+                        <th className="px-6 py-4 font-semibold">Time / Duration</th>
+                        <th className="px-6 py-4 font-semibold">Report</th>
+                        <th className="px-6 py-4 font-semibold">Evidence</th>
                       </tr>
-                    ) : (
-                      logbooks.map((log) => (
-                        <tr key={log.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-gray-800">
-                            {new Date(log.date).toLocaleDateString()}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                            <span className="font-medium">{log.clock_in?.substring(0,5)} - {log.clock_out?.substring(0,5)}</span>
-                            <br/>
-                            <span className="text-xs text-gray-400">({Number(log.hours_worked).toFixed(1)} hrs)</span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700 max-w-xs truncate">
-                            {log.task_description}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            {log.evidence_url ? (
-                              <a 
-                                href={log.evidence_url} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline font-semibold">
-                                View Evidence
-                              </a>
-                            ) : (
-                              <span className="text-gray-400">None</span>
-                            )}
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {logbooks.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className="px-6 py-12 text-center text-gray-500 bg-gray-50/50">
+                            No logbook entries found. Click "+ New Logbook Entry" to create your first report!
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                      ) : (
+                        logbooks.map((log) => (
+                          <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap text-gray-900 font-medium">
+                              {new Date(log.date).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              <span className="font-medium text-gray-900">{log.clock_in?.substring(0,5)} - {log.clock_out?.substring(0,5)}</span>
+                              <br/>
+                              <span className="text-xs text-gray-400">({Number(log.hours_worked).toFixed(1)} hrs)</span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
+                              {log.task_description}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {log.evidence_url ? (
+                                <a 
+                                  href={log.evidence_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="text-gray-900 font-medium hover:text-gray-600 hover:underline transition-colors"
+                                >
+                                  View File
+                                </a>
+                              ) : (
+                                <span className="text-gray-400 italic">None</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
             
           </div>
         )}

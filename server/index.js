@@ -22,6 +22,28 @@ const pool = mysql.createPool({
     }
 });
 
+// --- AUTO-SETUP DATABASE TABLES ---
+const initializeDB = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS Placement_Requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id INT NOT NULL,
+        company_id INT NOT NULL,
+        status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES Users(id) ON DELETE CASCADE,
+        FOREIGN KEY (company_id) REFERENCES Users(id) ON DELETE CASCADE
+      )
+    `);
+    console.log("✅ Placement_Requests table verified/created successfully.");
+  } catch (error) {
+    console.error("❌ Failed to create table:", error.message);
+  }
+};
+initializeDB();
+// ----------------------------------
+
 // --- CLOUDINARY FILE UPLOAD SETUP ---
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -159,7 +181,18 @@ app.post('/login', async (req, res) => {
 // --- GET: Fetch Company Directory ---
 app.get('/companies', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM Companies ORDER BY name ASC');
+    // Pull companies directly from the registered Supervisor accounts so the IDs match perfectly!
+    const [rows] = await pool.query(`
+      SELECT U.id, 
+             CP.company_name AS name, 
+             CP.address AS location, 
+             'Various Internship Roles' AS roles,
+             'Approved SUCCMS Internship Partner' AS description,
+             'Industry Partner' AS industry
+      FROM Users U
+      JOIN Company_Profiles CP ON U.id = CP.user_id
+      WHERE U.role = 'Company_Supervisor'
+    `);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch companies error:', error);
@@ -428,6 +461,92 @@ app.get('/resources', authenticateToken, async (req, res) => {
   }
 });
 
+// --- PLACEMENT REQUEST ROUTES ---
+
+// 1. Student submits a request
+app.post('/placement-requests', authenticateToken, async (req, res) => {
+  try {
+    const student_id = req.user.userId;
+    const { company_id } = req.body;
+    
+    if (!student_id || !company_id) {
+       return res.status(400).json({ error: `Missing Data! Student ID: ${student_id}, Company ID: ${company_id}` });
+    }
+
+    // Check if they already have a pending request (Using explicit string literal)
+    const [existing] = await pool.query(
+      "SELECT * FROM Placement_Requests WHERE student_id = ? AND status = 'Pending'", 
+      [student_id]
+    );
+    
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'You already have a pending placement request.' });
+    }
+
+    await pool.query(
+      "INSERT INTO Placement_Requests (student_id, company_id, status) VALUES (?, ?, 'Pending')", 
+      [student_id, company_id]
+    );
+    
+    res.status(200).json({ message: 'Request submitted successfully.' });
+  } catch (error) {
+    console.error('Request error:', error);
+    res.status(500).json({ error: `Database Error: ${error.message}` });
+  }
+});
+
+// 2. Admin views pending requests (Removed /api)
+app.get('/admin/placement-requests', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super_Admin') return res.status(403).json({ error: 'Unauthorized' });
+  try {
+    const [rows] = await pool.query(`
+      SELECT PR.id, PR.status, PR.created_at,
+             S.full_name as student_name, S.email as student_email,
+             C.full_name as supervisor_name, CP.company_name
+      FROM Placement_Requests PR
+      JOIN Users S ON PR.student_id = S.id
+      JOIN Users C ON PR.company_id = C.id
+      LEFT JOIN Company_Profiles CP ON C.id = CP.user_id
+      WHERE PR.status = 'Pending'
+    `);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch requests error:', error);
+    res.status(500).json({ error: 'Failed to fetch placement requests.' });
+  }
+});
+
+// 3. Admin approves or rejects request (Removed /api)
+app.put('/admin/placement-requests/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super_Admin') return res.status(403).json({ error: 'Unauthorized' });
+  
+  const { status } = req.body; // 'Approved' or 'Rejected'
+  
+  try {
+    const [request] = await pool.query('SELECT * FROM Placement_Requests WHERE id = ?', [req.params.id]);
+    if (request.length === 0) return res.status(404).json({ error: 'Request not found.' });
+
+    // Update the request status
+    await pool.query('UPDATE Placement_Requests SET status = ? WHERE id = ?', [status, req.params.id]);
+
+    // If approved, automatically update the student's assigned company and supervisor in the Users table
+    if (status === 'Approved') {
+      const [supervisor] = await pool.query('SELECT CP.company_name FROM Users C LEFT JOIN Company_Profiles CP ON C.id = CP.user_id WHERE C.id = ?', [request[0].company_id]);
+      
+      await pool.query(
+        'UPDATE Users SET assigned_company = ?, assigned_supervisor_id = ? WHERE id = ?',
+        [supervisor[0].company_name, request[0].company_id, request[0].student_id]
+      );
+    }
+    
+    res.status(200).json({ message: `Placement successfully ${status.toLowerCase()}.` });
+  } catch (error) {
+    console.error('Update request error:', error);
+    res.status(500).json({ error: 'Failed to update request.' });
+  }
+});
+
+
 // --- FINAL EVALUATION ROUTES ---
 
 // Get all students for evaluation grading
@@ -494,6 +613,52 @@ app.post('/evaluator/lecturer-score', authenticateToken, async (req, res) => {
   }
 });
 
+// --- EVALUATION ROUTES ---
+
+// Submit or Update an Evaluation
+app.post('/evaluations', authenticateToken, async (req, res) => {
+  try {
+    const { student_id, scores } = req.body;
+    const evaluator_id = req.user.userId; // <--- FIXED: Now correctly reads userId
+    const evaluator_role = req.user.role;
+
+    if (!['Company_Supervisor', 'Lecturer'].includes(evaluator_role)) {
+      return res.status(403).json({ error: 'Only supervisors can submit evaluations.' });
+    }
+
+    const total_score = scores.reduce((a, b) => a + b, 0);
+
+    // Insert or update if they are editing their existing evaluation
+    await pool.query(`
+      INSERT INTO Evaluations (student_id, evaluator_id, evaluator_role, rubric_1, rubric_2, rubric_3, rubric_4, rubric_5, total_score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE 
+        rubric_1=VALUES(rubric_1), rubric_2=VALUES(rubric_2), rubric_3=VALUES(rubric_3), 
+        rubric_4=VALUES(rubric_4), rubric_5=VALUES(rubric_5), total_score=VALUES(total_score)
+    `, [student_id, evaluator_id, evaluator_role, ...scores, total_score]);
+
+    res.status(200).json({ message: 'Evaluation saved successfully.' });
+  } catch (error) {
+    console.error('Eval error:', error);
+    res.status(500).json({ error: 'Failed to submit evaluation.' });
+  }
+});
+
+// Fetch Evaluations for a specific student (Removed /api)
+app.get('/evaluations/:studentId', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT evaluator_role, total_score 
+      FROM Evaluations 
+      WHERE student_id = ?
+    `, [req.params.studentId]);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch eval error:', error);
+    res.status(500).json({ error: 'Failed to fetch evaluations.' });
+  }
+});
+
 app.listen(PORT, ()=>{
-        console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });

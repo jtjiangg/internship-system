@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Card, CardHeader, CardContent, Label, Input, Select, Button } from './components/ui';
 
 function AuthForm({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -58,74 +59,85 @@ function AuthForm({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
-          {isLogin ? 'Internship System Login' : 'Create an Account'}
-        </h2>
-        <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      <div className="w-full max-w-md">
+        
+        <Card>
+          <CardHeader 
+            title={isLogin ? 'Internship System Login' : 'Create an Account'} 
+            subtitle={isLogin ? 'Sign in to access your portal' : 'Register for a new account'}
+          />
           
-          {!isLogin && (
-            <>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Full Name:</label>
-                <input 
-                  type="text" 
-                  className="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="John Doe"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+          <CardContent>
+            <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-5">
+              
+              {!isLogin && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Full Name</Label>
+                    <Input 
+                      type="text" 
+                      placeholder="John Doe"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Role</Label>
+                    <Select 
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                    >
+                      <option value="Student">Student</option>
+                      <option value="Lecturer">Lecturer</option>
+                      <option value="Company_Supervisor">Company Supervisor</option>
+                    </Select>
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input 
+                  type="email" 
+                  placeholder="user@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Role:</label>
-                <select 
-                  className="w-full px-4 py-2 border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                >
-                  <option value="Student">Student</option>
-                  <option value="Lecturer">Lecturer</option>
-                  <option value="Company_Supervisor">Company Supervisor</option>
-                </select>
+
+              <div className="space-y-1.5">
+                <Label>Password</Label>
+                <Input 
+                  type="password" 
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
               </div>
-            </>
-          )}
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-1">Email:</label>
-            <input 
-              type="email" 
-              className="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="user@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+              <div className="flex flex-col pt-4 space-y-3">
+                <Button type="submit" className="w-full">
+                  {isLogin ? 'Login' : 'Sign Up'}
+                </Button>
+                
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  className="w-full"
+                  onClick={() => setIsLogin(!isLogin)}
+                >
+                  {isLogin ? "Don't have an account? Register" : "Already have an account? Login"}
+                </Button>
+              </div>
+              
+            </form>
+          </CardContent>
+        </Card>
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-1">Password:</label>
-            <input 
-              type="password" 
-              className="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="flex flex-col pt-4 space-y-3">
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {isLogin ? 'Login' : 'Sign Up'}
-            </button>
-            <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-gray-500 hover:text-gray-700 text-sm font-semibold">
-              {isLogin ? "Don't have an account? Register" : "Already have an account? Login"}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );
