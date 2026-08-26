@@ -12,6 +12,13 @@ function SuperAdminDashboard({ user, onLogout }) {
     assigned_company: '', assigned_supervisor_id: '', internship_duration: ''
   });
   const [photoFile, setPhotoFile] = useState(null);
+  const [usersList, setUsersList] = useState([]);
+
+  // User Management State
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('All');
+  const [usersCurrentPage, setUsersCurrentPage] = useState(1);
+  const usersPerPage = 10;
 
   // Data Fetching State
   const [systemLogbooks, setSystemLogbooks] = useState([]);
@@ -25,6 +32,7 @@ function SuperAdminDashboard({ user, onLogout }) {
   useEffect(() => {
     if (activeTab === 'manageLogbooks') fetchSystemLogbooks();
     if (activeTab === 'placementRequests') fetchPlacementRequests();
+    if (activeTab === 'manageUsers') fetchUsersList();
     fetchSupervisors(); 
   }, [activeTab]);
 
@@ -33,6 +41,56 @@ function SuperAdminDashboard({ user, onLogout }) {
     try {
       const response = await fetch('/api/admin/logbooks', { headers: { 'Authorization': `Bearer ${token}` } });
       if (response.ok) setSystemLogbooks(await response.json());
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleDeleteLogbook = async (id) => {
+    if (!window.confirm('Are you sure you want to permanently delete this logbook?')) return;
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch(`/api/admin/logbooks/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        alert('Logbook deleted.');
+        fetchSystemLogbooks();
+      } else {
+        alert('Failed to delete logbook.');
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const fetchUsersList = async () => {
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (response.ok) setUsersList(await response.json());
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleDeleteUser = async (id, role) => {
+    if (!window.confirm(`Are you sure you want to permanently delete this ${role.replace('_', ' ')}? This action cannot be undone.`)) return;
+    
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch(`/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        alert('User deleted successfully.');
+        fetchUsersList(); // Refresh the table
+      } else {
+        const data = await response.json();
+        alert(data.error);
+      }
     } catch (error) {
       console.error(error);
     }
@@ -133,6 +191,27 @@ function SuperAdminDashboard({ user, onLogout }) {
     }
   };
 
+  // --- USER MANAGEMENT LOGIC ---
+  const filteredUsers = usersList.filter(user => {
+    // Check if the search term matches the name, email, or company
+    const matchesSearch = 
+      user.full_name.toLowerCase().includes(userSearchTerm.toLowerCase()) || 
+      user.email.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+      (user.own_company_name && user.own_company_name.toLowerCase().includes(userSearchTerm.toLowerCase())) ||
+      (user.assigned_company && user.assigned_company.toLowerCase().includes(userSearchTerm.toLowerCase()));
+    
+    // Check if the role matches the dropdown filter
+    const matchesRole = userRoleFilter === 'All' || user.role === userRoleFilter;
+    
+    return matchesSearch && matchesRole;
+  });
+
+  const indexOfLastUser = usersCurrentPage * usersPerPage;
+  const indexOfFirstUser = indexOfLastUser - usersPerPage;
+  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
+  const totalUserPages = Math.ceil(filteredUsers.length / usersPerPage);
+  const paginateUsers = (pageNumber) => setUsersCurrentPage(pageNumber);
+
   return (
     <div className="min-h-screen bg-gray-50 p-8 print:bg-white print:p-0">
       <div className="max-w-7xl mx-auto">
@@ -157,6 +236,9 @@ function SuperAdminDashboard({ user, onLogout }) {
           </Button>
           <Button variant={activeTab === 'manageCompanies' ? 'primary' : 'ghost'} onClick={() => setActiveTab('manageCompanies')}>
             Company Directory
+          </Button>
+          <Button variant={activeTab === 'manageUsers' ? 'primary' : 'ghost'} onClick={() => setActiveTab('manageUsers')}>
+            Manage Users
           </Button>
         </div>
 
@@ -323,6 +405,65 @@ function SuperAdminDashboard({ user, onLogout }) {
           </Card>
         )}
 
+        {/* VIEW: MANAGE SYSTEM LOGBOOKS */}
+        {activeTab === 'manageLogbooks' && (
+          <Card>
+            <CardHeader title="System Logbooks" subtitle="Monitor and manage all student logbook entries" />
+            <CardContent className="p-0 sm:p-6">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-left border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
+                      <th className="px-6 py-4 font-semibold">Date</th>
+                      <th className="px-6 py-4 font-semibold">Student</th>
+                      <th className="px-6 py-4 font-semibold">Company</th>
+                      <th className="px-6 py-4 font-semibold">Status</th>
+                      <th className="px-6 py-4 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {systemLogbooks.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="px-6 py-12 text-center text-gray-500 bg-gray-50/50">
+                          No logbooks found in the system.
+                        </td>
+                      </tr>
+                    ) : (
+                      systemLogbooks.map((log) => (
+                        <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900 font-medium">
+                            {new Date(log.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 text-gray-900 font-medium">
+                            {log.student_name}
+                          </td>
+                          <td className="px-6 py-4 text-gray-600 text-sm">
+                            {log.assigned_company || 'N/A'}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
+                              log.status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                              log.status === 'Rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                              'bg-yellow-50 text-yellow-700 border-yellow-200'
+                            }`}>
+                              {log.status || 'Pending'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Button size="sm" variant="danger" onClick={() => handleDeleteLogbook(log.id)}>
+                              Delete
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* VIEW: COMPANY DIRECTORY */}
         {activeTab === 'manageCompanies' && (
           <Card className="print:shadow-none print:border-none print:w-full">
@@ -402,6 +543,117 @@ function SuperAdminDashboard({ user, onLogout }) {
                 <Button onClick={handlePrint}>Print Directory</Button>
                 <Button variant="secondary" onClick={() => setActiveTab('createUser')}>Close View</Button>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* VIEW: MANAGE USERS */}
+        {activeTab === 'manageUsers' && (
+          <Card>
+            <CardHeader 
+              title="User Management" 
+              subtitle="Search, filter, and remove system users" 
+              action={<span className="text-sm font-medium text-gray-500 bg-white px-3 py-1 rounded-full border border-gray-200">Total: {filteredUsers.length}</span>}
+            />
+            <CardContent className="p-0 sm:p-6">
+              
+              {/* Search and Filter Controls */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-6 px-4 sm:px-0">
+                <Input 
+                  type="text" 
+                  placeholder="Search by name, email, or company..." 
+                  value={userSearchTerm}
+                  onChange={(e) => { setUserSearchTerm(e.target.value); setUsersCurrentPage(1); }}
+                  className="flex-1"
+                />
+                <Select 
+                  value={userRoleFilter} 
+                  onChange={(e) => { setUserRoleFilter(e.target.value); setUsersCurrentPage(1); }}
+                  className="w-full sm:w-48"
+                >
+                  <option value="All">All Roles</option>
+                  <option value="Student">Student</option>
+                  <option value="Company_Supervisor">Company Supervisor</option>
+                  <option value="Lecturer">Lecturer</option>
+                  <option value="Super_Admin">Super Admin</option>
+                </Select>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-left border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
+                      <th className="px-6 py-4 font-semibold">Name</th>
+                      <th className="px-6 py-4 font-semibold">Role</th>
+                      <th className="px-6 py-4 font-semibold">Company / Affiliation</th>
+                      <th className="px-6 py-4 font-semibold">Joined Date</th>
+                      <th className="px-6 py-4 font-semibold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {currentUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="px-6 py-12 text-center text-gray-500 bg-gray-50/50">
+                          No users found matching your criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      currentUsers.map((u) => (
+                        <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-gray-900">{u.full_name}</div>
+                            <div className="text-xs text-gray-500 mt-0.5">{u.email}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                              u.role === 'Super_Admin' ? 'bg-purple-100 text-purple-700' :
+                              u.role === 'Company_Supervisor' ? 'bg-blue-100 text-blue-700' :
+                              u.role === 'Lecturer' ? 'bg-orange-100 text-orange-700' :
+                              'bg-green-100 text-green-700'
+                            }`}>
+                              {u.role.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            {u.role === 'Company_Supervisor' ? (
+                              <span className="font-medium text-blue-800">{u.own_company_name || 'N/A'}</span>
+                            ) : u.role === 'Student' ? (
+                              <span className="text-gray-600">{u.assigned_company || 'Unassigned'}</span>
+                            ) : (
+                              <span className="text-gray-400 italic">SUCCMS Staff</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-gray-500 text-sm">
+                            {new Date(u.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <Button 
+                              size="sm" 
+                              variant="danger" 
+                              disabled={u.id === user.id} 
+                              onClick={() => handleDeleteUser(u.id, u.role)}
+                            >
+                              Delete
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              {totalUserPages > 1 && (
+                <div className="flex justify-center items-center gap-1.5 mt-6 pb-2">
+                  <Button variant="secondary" onClick={() => paginateUsers(usersCurrentPage > 1 ? usersCurrentPage - 1 : 1)} disabled={usersCurrentPage === 1}>Prev</Button>
+                  {[...Array(totalUserPages)].map((_, i) => (
+                    <Button key={i} variant={usersCurrentPage === i + 1 ? 'primary' : 'ghost'} onClick={() => paginateUsers(i + 1)} className="px-3 min-w-[2.5rem]">{i + 1}</Button>
+                  ))}
+                  <Button variant="secondary" onClick={() => paginateUsers(usersCurrentPage < totalUserPages ? usersCurrentPage + 1 : totalUserPages)} disabled={usersCurrentPage === totalUserPages}>Next</Button>
+                </div>
+              )}
+
             </CardContent>
           </Card>
         )}

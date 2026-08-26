@@ -81,6 +81,14 @@ app.post('/register', async(req, res) => {
         //unpack data sent by user
         const{full_name, email, password, role}=req.body;
 
+        // 🔒 SECURITY LOCK: Prevent Ghost Users
+        // Only allow students to use the public sign-up page.
+        if (role !== 'Student') {
+            return res.status(403).json({ 
+                error: 'Only Students can register here. Company Supervisors and Lecturers must be officially onboarded by the University Admin.' 
+            });
+        }
+
         //security check: scramble passwords
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
@@ -103,7 +111,7 @@ app.post('/register', async(req, res) => {
         console.error('Registration error:', error);
         // If the email already exists, MySQL throws a specific error code
         if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({ error: 'This email is already registered.' });
+            return res.status(400).json({ error: 'This email is already registered.' });
         }
         res.status(500).json({ error: 'Failed to register user.' });
     }
@@ -135,8 +143,13 @@ app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if the user exists in the database
-    const findUserQuery = `SELECT * FROM Users WHERE email = ?`;
+    // UPDATE: We now use a LEFT JOIN to grab the company name if they are a supervisor
+    const findUserQuery = `
+      SELECT U.*, CP.company_name AS own_company_name 
+      FROM Users U 
+      LEFT JOIN Company_Profiles CP ON U.id = CP.user_id 
+      WHERE U.email = ?
+    `;
     const [users] = await pool.query(findUserQuery, [email]);
 
     if (users.length === 0) {
@@ -144,23 +157,18 @@ app.post('/login', async (req, res) => {
     }
 
     const user = users[0];
-
-    // Check if the password matches the scrambled hash
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    // Generate the VIP Wristband (JWT)
-    // We bundle their ID and Role inside the token
     const token = jwt.sign(
       { userId: user.id, role: user.role }, 
       process.env.JWT_SECRET, 
-      { expiresIn: '24h' } // Token expires in 1 day
+      { expiresIn: '24h' }
     );
 
-    // Send the token and user data back to the frontend
     res.status(200).json({
       message: 'Login successful!',
       token: token,
@@ -168,10 +176,12 @@ app.post('/login', async (req, res) => {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        assigned_company: user.assigned_company, 
+        assigned_supervisor_id: user.assigned_supervisor_id,
+        company_name: user.own_company_name // <--- NEW: Sends the supervisor's company name to React!
       }
     });
-
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Failed to log in.' });
@@ -249,7 +259,7 @@ app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, 
 
 // --- EVALUATOR DASHBOARD ROUTES ---
 
-// 1. Fetch all student logbooks (Evaluators Only)
+// 1. Fetch student logbooks (Evaluators Only)
 app.get('/evaluator/logbooks', authenticateToken, async (req, res) => {
   try {
     // Security check: Kick out students
@@ -257,14 +267,22 @@ app.get('/evaluator/logbooks', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized access.' });
     }
     
-    // Join Users table to get the actual student name instead of just their ID
-    const query = `
-      SELECT L.*, U.full_name AS student_name 
+    let query = `
+      SELECT L.*, U.full_name AS student_name, U.assigned_company 
       FROM Logbooks L 
       JOIN Users U ON L.student_id = U.id 
-      ORDER BY L.date DESC
     `;
-    const [rows] = await pool.query(query);
+    let queryParams = [];
+
+    // PRIVACY LOCK: If Company Supervisor, only show their specific interns
+    if (req.user.role === 'Company_Supervisor') {
+      query += ` WHERE U.assigned_supervisor_id = ? `;
+      queryParams.push(req.user.userId);
+    }
+
+    query += ` ORDER BY L.date DESC`;
+
+    const [rows] = await pool.query(query, queryParams);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch evaluator logbooks error:', error);
@@ -299,13 +317,39 @@ app.get('/admin/users', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Super Admin access required.' });
     }
     
-    const [rows] = await pool.query(
-      'SELECT id, full_name, email, role, created_at FROM Users ORDER BY role, full_name'
-    );
+    // We use a LEFT JOIN to grab the company name if they are a Company Supervisor
+    const [rows] = await pool.query(`
+      SELECT U.id, U.full_name, U.email, U.role, U.created_at, 
+             U.assigned_company, CP.company_name AS own_company_name 
+      FROM Users U 
+      LEFT JOIN Company_Profiles CP ON U.id = CP.user_id
+      ORDER BY U.role, U.full_name
+    `);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch users error:', error);
     res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
+// Super Admin: Fetch ALL system logbooks
+app.get('/admin/logbooks', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') {
+      return res.status(403).json({ error: 'Super Admin access required.' });
+    }
+    
+    const query = `
+      SELECT L.*, U.full_name AS student_name, U.assigned_company 
+      FROM Logbooks L 
+      JOIN Users U ON L.student_id = U.id 
+      ORDER BY L.date DESC
+    `;
+    const [rows] = await pool.query(query);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Fetch all logbooks error:', error);
+    res.status(500).json({ error: 'Failed to fetch logbooks.' });
   }
 });
 
@@ -549,21 +593,28 @@ app.put('/admin/placement-requests/:id', authenticateToken, async (req, res) => 
 
 // --- FINAL EVALUATION ROUTES ---
 
-// Get all students for evaluation grading
+// Get students for evaluation grading
 app.get('/evaluator/students', authenticateToken, async (req, res) => {
   try {
     if (req.user.role === 'Student') return res.status(403).json({ error: 'Unauthorized.' });
     
-    // Fetch all students and their current evaluation status
-    const query = `
-      SELECT U.id, U.full_name, U.email, 
+    let query = `
+      SELECT U.id, U.full_name, U.email, U.assigned_company,
              COALESCE(E.company_score, 0) as company_score, 
              COALESCE(E.company_evaluated, 0) as company_evaluated
       FROM Users U
       LEFT JOIN Evaluations E ON U.id = E.student_id
       WHERE U.role = 'Student'
     `;
-    const [rows] = await pool.query(query);
+    let queryParams = [];
+
+    // PRIVACY LOCK: If Company Supervisor, only show their specific interns
+    if (req.user.role === 'Company_Supervisor') {
+      query += ` AND U.assigned_supervisor_id = ?`;
+      queryParams.push(req.user.userId);
+    }
+
+    const [rows] = await pool.query(query, queryParams);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch students error:', error);

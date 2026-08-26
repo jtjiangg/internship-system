@@ -126,7 +126,10 @@ function EvaluatorDashboard({ user, onLogout }) {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Evaluator Dashboard</h1>
-            <p className="text-gray-500 mt-1">{user?.full_name} | Role: {user?.role.replace('_', ' ')}</p>
+                <p className="text-gray-500 mt-1">
+                  {user?.full_name} | {user?.role.replace('_', ' ')} 
+                  {user?.role === 'Company_Supervisor' && user?.company_name ? ` at ${user.company_name}` : ''}
+                </p>
           </div>
           <Button variant="danger" onClick={onLogout}>
             Logout
