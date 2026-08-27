@@ -29,6 +29,8 @@ function EvaluatorDashboard({ user, onLogout }) {
     "Overall Professional Growth"
   ];
 
+  const [guidelinesText, setGuidelinesText] = useState('');
+
   // Fetch assigned students
   useEffect(() => {
     const fetchStudents = async () => {
@@ -69,6 +71,16 @@ function EvaluatorDashboard({ user, onLogout }) {
     // Reset scores when switching students
     setScores([0, 0, 0, 0, 0]); 
   }, [selectedStudent, activeTab]);
+
+  // Inside your existing useEffect or fetch logic, trigger this if they click the tab
+  useEffect(() => {
+    if (activeTab === 'guidelines') {
+      fetch('/api/settings/guidelines', { headers: { 'Authorization': `Bearer ${sessionStorage.getItem('internship_token')}` } })
+        .then(res => res.json())
+        .then(data => setGuidelinesText(data.guidelines))
+        .catch(err => console.error(err));
+    }
+  }, [activeTab]);
 
   const handleScoreChange = (index, value) => {
     const newScores = [...scores];
@@ -170,6 +182,11 @@ function EvaluatorDashboard({ user, onLogout }) {
               >
                 Final Evaluation
               </Button>
+              {user?.role === 'Lecturer' && (
+                <Button variant={activeTab === 'guidelines' ? 'primary' : 'ghost'} onClick={() => setActiveTab('guidelines')}>
+                  Official Information
+                </Button>
+              )}
             </div>
 
             {/* VIEW: LOGBOOKS */}
@@ -305,6 +322,18 @@ function EvaluatorDashboard({ user, onLogout }) {
           </>
         )}
       </div>
+
+      {/* VIEW: OFFICIAL GUIDELINES */}
+        {activeTab === 'guidelines' && (
+          <Card>
+            <CardHeader title="Official Forms and Information" subtitle="SUCCMS Internship Rules and Regulations" />
+            <CardContent>
+              <div className="bg-gray-50 border border-gray-200 p-6 rounded-lg whitespace-pre-wrap text-gray-700">
+                {guidelinesText || "No official guidelines have been posted yet."}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
       {/* Modal logic stays the same ... */}
       {selectedEvidence && (

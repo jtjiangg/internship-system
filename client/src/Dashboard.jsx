@@ -8,6 +8,7 @@ function Dashboard({ user, onLogout }) {
   
   const [logbooks, setLogbooks] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [guidelinesText, setGuidelinesText] = useState('');
   
   // Resources State
   const [resources, setResources] = useState([]);
@@ -49,9 +50,25 @@ function Dashboard({ user, onLogout }) {
     }
   };
 
+  const fetchGuidelines = async () => {
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch('/api/settings/guidelines', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setGuidelinesText(data.guidelines);
+      }
+    } catch (error) {
+      console.error("Failed to fetch guidelines:", error);
+    }
+  };
+
   useEffect(() => {
     fetchLogbooks();
     fetchResources();
+    fetchGuidelines();
   }, []);
 
   const handleLogbookSubmit = async (e) => {
@@ -222,8 +239,16 @@ function Dashboard({ user, onLogout }) {
 
             {/* Official Forms */}
             <Card>
-              <CardHeader title="Official Forms & Information" />
+              <CardHeader title="Official Forms & Information" subtitle="SUCCMS Internship Rules and Regulations" />
               <CardContent>
+                
+                {/* 1. The Official Guidelines Text */}
+                <div className="bg-gray-50 border border-gray-200 p-5 rounded-lg whitespace-pre-wrap text-gray-700 text-sm mb-6 leading-relaxed">
+                  {guidelinesText || "No official guidelines have been posted yet."}
+                </div>
+
+                {/* 2. Downloadable Resources */}
+                <h3 className="font-bold text-gray-900 mb-3 text-xs uppercase tracking-wider">Downloadable Forms</h3>
                 <ul className="space-y-3">
                   {resources.length === 0 ? (
                     <li className="text-gray-500 text-sm">No documents available at this time.</li>
@@ -241,6 +266,7 @@ function Dashboard({ user, onLogout }) {
                     ))
                   )}
                 </ul>
+                
               </CardContent>
             </Card>
 

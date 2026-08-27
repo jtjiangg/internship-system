@@ -29,10 +29,13 @@ function SuperAdminDashboard({ user, onLogout }) {
   const [currentPage, setCurrentPage] = useState(1);
   const companiesPerPage = 5;
 
+  const [guidelinesText, setGuidelinesText] = useState('');
+
   useEffect(() => {
     if (activeTab === 'manageLogbooks') fetchSystemLogbooks();
     if (activeTab === 'placementRequests') fetchPlacementRequests();
     if (activeTab === 'manageUsers') fetchUsersList();
+    if (activeTab === 'manageGuidelines') fetchGuidelines();
     fetchSupervisors(); 
   }, [activeTab]);
 
@@ -104,6 +107,29 @@ function SuperAdminDashboard({ user, onLogout }) {
     } catch (error) {
       console.error(error);
     }
+  };
+
+  const fetchGuidelines = async () => {
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch('/api/settings/guidelines', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (response.ok) {
+        const data = await response.json();
+        setGuidelinesText(data.guidelines);
+      }
+    } catch (error) { console.error(error); }
+  };
+
+  const handleSaveGuidelines = async () => {
+    const token = sessionStorage.getItem('internship_token');
+    try {
+      const response = await fetch('/api/settings/guidelines', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ guidelines: guidelinesText })
+      });
+      if (response.ok) alert('Official Guidelines updated successfully!');
+    } catch (error) { console.error(error); }
   };
 
   const fetchPlacementRequests = async () => {
@@ -239,6 +265,9 @@ function SuperAdminDashboard({ user, onLogout }) {
           </Button>
           <Button variant={activeTab === 'manageUsers' ? 'primary' : 'ghost'} onClick={() => setActiveTab('manageUsers')}>
             Manage Users
+          </Button>
+          <Button variant={activeTab === 'manageGuidelines' ? 'primary' : 'ghost'} onClick={() => setActiveTab('manageGuidelines')}>
+            Official Guidelines
           </Button>
         </div>
 
@@ -657,6 +686,24 @@ function SuperAdminDashboard({ user, onLogout }) {
             </CardContent>
           </Card>
         )}
+
+        {/* VIEW: MANAGE GUIDELINES */}
+              {activeTab === 'manageGuidelines' && (
+                <Card>
+                  <CardHeader title="Official Forms and Information" subtitle="Update the rules and regulations visible to students and lecturers." />
+                  <CardContent>
+                    <textarea 
+                      className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      value={guidelinesText}
+                      onChange={(e) => setGuidelinesText(e.target.value)}
+                      placeholder="Enter internship rules, formatting guidelines, or announcements here..."
+                    />
+                    <div className="mt-4 flex justify-end">
+                      <Button onClick={handleSaveGuidelines}>Save Guidelines</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
       </div>
     </div>

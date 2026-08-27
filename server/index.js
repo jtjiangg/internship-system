@@ -36,6 +36,18 @@ const initializeDB = async () => {
         FOREIGN KEY (company_id) REFERENCES Users(id) ON DELETE CASCADE
       )
     `);
+    // Add these right below your Placement_Requests table setup
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS System_Settings (
+        setting_key VARCHAR(50) PRIMARY KEY,
+        setting_value LONGTEXT NOT NULL
+      )
+    `);
+    // Insert a blank default so the page doesn't crash on first load
+    await pool.query(`
+      INSERT IGNORE INTO System_Settings (setting_key, setting_value) 
+      VALUES ('internship_guidelines', 'Welcome to the SUCCMS Internship Program. Please adhere to the standard procedures.')
+    `);
     console.log("✅ Placement_Requests table verified/created successfully.");
   } catch (error) {
     console.error("❌ Failed to create table:", error.message);
@@ -262,7 +274,6 @@ app.post('/logbooks', authenticateToken, upload.single('evidence'), async (req, 
 // 1. Fetch student logbooks (Evaluators Only)
 app.get('/evaluator/logbooks', authenticateToken, async (req, res) => {
   try {
-    // Security check: Kick out students
     if (req.user.role === 'Student') {
       return res.status(403).json({ error: 'Unauthorized access.' });
     }
@@ -272,39 +283,64 @@ app.get('/evaluator/logbooks', authenticateToken, async (req, res) => {
       FROM Logbooks L 
       JOIN Users U ON L.student_id = U.id 
     `;
-    let queryParams = [];
 
-    // PRIVACY LOCK: If Company Supervisor, only show their specific interns
+    // PRIVACY LOCK: Split queries explicitly to avoid empty array crashes
     if (req.user.role === 'Company_Supervisor') {
-      query += ` WHERE U.assigned_supervisor_id = ? `;
-      queryParams.push(req.user.userId);
+      query += ` WHERE U.assigned_supervisor_id = ? ORDER BY L.date DESC`;
+      const [rows] = await pool.query(query, [req.user.userId]);
+      return res.status(200).json(rows);
+    } else {
+      // Lecturers see all logbooks
+      query += ` ORDER BY L.date DESC`;
+      const [rows] = await pool.query(query);
+      return res.status(200).json(rows);
     }
-
-    query += ` ORDER BY L.date DESC`;
-
-    const [rows] = await pool.query(query, queryParams);
-    res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch evaluator logbooks error:', error);
     res.status(500).json({ error: 'Failed to fetch logbooks.' });
   }
 });
 
-// 2. Update Logbook Status & Comments (Approve/Reject)
-app.put('/logbooks/:id/status', authenticateToken, async (req, res) => {
+// Fetch logbooks for a SPECIFIC student (Fixes the 404)
+app.get('/evaluator/logbooks/:studentId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === 'Student') {
-      return res.status(403).json({ error: 'Unauthorized access.' });
-    }
-    
-    const { status, comments } = req.body; 
-    const logbookId = req.params.id;
-    
-    await pool.query('UPDATE Logbooks SET status = ?, comments = ? WHERE id = ?', [status, comments || null, logbookId]);
-    res.status(200).json({ message: `Logbook ${status} successfully.` });
+    const [rows] = await pool.query(
+      'SELECT * FROM Logbooks WHERE student_id = ? ORDER BY date DESC', 
+      [req.params.studentId]
+    );
+    res.status(200).json(rows);
   } catch (error) {
-    console.error('Update status error:', error);
-    res.status(500).json({ error: 'Failed to update logbook status.' });
+    console.error('Fetch specific logbooks error:', error);
+    res.status(500).json({ error: 'Failed to fetch student logbooks.' });
+  }
+});
+
+// 2. Get students for evaluation grading
+app.get('/evaluator/students', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'Student') return res.status(403).json({ error: 'Unauthorized.' });
+    
+    let query = `
+      SELECT U.id, U.full_name, U.email, U.assigned_company,
+             COALESCE(E.company_score, 0) as company_score, 
+             COALESCE(E.company_evaluated, 0) as company_evaluated
+      FROM Users U
+      LEFT JOIN Evaluations E ON U.id = E.student_id
+      WHERE U.role = 'Student'
+    `;
+
+    if (req.user.role === 'Company_Supervisor') {
+      query += ` AND U.assigned_supervisor_id = ?`;
+      const [rows] = await pool.query(query, [req.user.userId]);
+      return res.status(200).json(rows);
+    } else {
+      // Lecturers see all active students
+      const [rows] = await pool.query(query);
+      return res.status(200).json(rows);
+    }
+  } catch (error) {
+    console.error('Fetch students error:', error);
+    res.status(500).json({ error: 'Failed to fetch students.' });
   }
 });
 
@@ -695,18 +731,49 @@ app.post('/evaluations', authenticateToken, async (req, res) => {
   }
 });
 
-// Fetch Evaluations for a specific student (Removed /api)
+// Fetch Evaluations for a specific student (Fixes the 500)
 app.get('/evaluations/:studentId', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT evaluator_role, total_score 
-      FROM Evaluations 
-      WHERE student_id = ?
-    `, [req.params.studentId]);
+    // Changed to SELECT * to prevent column-mismatch crashes
+    const [rows] = await pool.query(
+      'SELECT * FROM Evaluations WHERE student_id = ?', 
+      [req.params.studentId]
+    );
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch eval error:', error);
-    res.status(500).json({ error: 'Failed to fetch evaluations.' });
+    // Send the literal MySQL error back to the browser console just in case!
+    res.status(500).json({ error: `Database Error: ${error.message}` });
+  }
+});
+
+// --- SYSTEM SETTINGS ROUTES ---
+
+// Get Official Guidelines (Accessible by Students, Lecturers, Admins)
+app.get('/settings/guidelines', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT setting_value FROM System_Settings WHERE setting_key = 'internship_guidelines'");
+    res.status(200).json({ guidelines: rows.length > 0 ? rows[0].setting_value : '' });
+  } catch (error) {
+    console.error('Fetch guidelines error:', error);
+    res.status(500).json({ error: 'Failed to fetch guidelines.' });
+  }
+});
+
+// Update Official Guidelines (Super Admin Only)
+app.put('/settings/guidelines', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Super_Admin') return res.status(403).json({ error: 'Unauthorized.' });
+    
+    const { guidelines } = req.body;
+    await pool.query(
+      "UPDATE System_Settings SET setting_value = ? WHERE setting_key = 'internship_guidelines'",
+      [guidelines]
+    );
+    res.status(200).json({ message: 'Guidelines updated successfully.' });
+  } catch (error) {
+    console.error('Update guidelines error:', error);
+    res.status(500).json({ error: 'Failed to update guidelines.' });
   }
 });
 
