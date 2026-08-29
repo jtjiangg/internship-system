@@ -353,7 +353,7 @@ app.get('/admin/users', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Super Admin access required.' });
     }
     
-    // We use a LEFT JOIN to grab the company name if they are a Company Supervisor
+    // LEFT JOIN to grab the company name if they are a Company Supervisor
     const [rows] = await pool.query(`
       SELECT U.id, U.full_name, U.email, U.role, U.created_at, 
              U.assigned_company, CP.company_name AS own_company_name 
@@ -742,7 +742,7 @@ app.get('/evaluations/:studentId', authenticateToken, async (req, res) => {
     res.status(200).json(rows);
   } catch (error) {
     console.error('Fetch eval error:', error);
-    // Send the literal MySQL error back to the browser console just in case!
+    // Send the literal MySQL error back to the browser console just in case
     res.status(500).json({ error: `Database Error: ${error.message}` });
   }
 });
